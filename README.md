@@ -8,14 +8,14 @@ Minimal setup for **KL Divergence based Post-Training Mixed-Precision Quantizati
 docker pull ghcr.io/tilmto/hymba:v1
 
 ## Repository Structure
-algorithm.py               # Mixed-precision allocator (KL-guided)
-evaluate_ppl.py            # Perplexity evaluation via lm-eval
-rank.py                    # Rank surrogate metrics vs perplexity
-sensitivity_analysis.py    # Per-layer sensitivity + stability metrics
-results/                   # Store KL JSON files here
-quant_utils.py             # Quantization utilities (user-provided)
+1. algorithm.py               # Mixed-precision allocator (KL-guided)  <br />
+2. evaluate_ppl.py            # Perplexity evaluation via lm-eval  <br />
+3. rank.py                    # Rank surrogate metrics vs perplexity  <br />
+4. sensitivity_analysis.py    # Per-layer sensitivity + stability metrics  <br />
+5. results/                   # Store KL JSON files here <br />
+6. quant_utils.py             # Quantization utilities (user-provided)  <br />
 
-🚀 Run the Container
+## Run the Container
 GPU
 docker run --rm -it --gpus all \
   -v $PWD:/workspace \
@@ -23,7 +23,7 @@ docker run --rm -it --gpus all \
   -w /workspace \
   ghcr.io/tilmto/hymba:v1 bash
 
-🧩 Quickstart
+## 🧩 Quickstart
 # 1. Evaluate baseline perplexity
 python evaluate_ppl.py
 
