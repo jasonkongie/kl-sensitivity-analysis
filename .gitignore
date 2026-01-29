@@ -1,0 +1,3 @@
+.venv-ov/
+checkpoints/
+openvino_exports/
