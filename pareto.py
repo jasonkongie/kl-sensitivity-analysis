@@ -26,12 +26,6 @@ from quant_utils import quantize_weight_per_channel_absmax
 from optimum.exporters.openvino import export_from_model
 
 
-# ---------------------------------------------------------------------------
-#  runtime device
-# ---------------------------------------------------------------------------
-DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
 
 # ----------  helpers ----------------------------------------------------------
 
