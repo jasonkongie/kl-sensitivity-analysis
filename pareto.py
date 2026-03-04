@@ -23,6 +23,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from lm_eval.models.huggingface import HFLM
 from lm_eval.evaluator import simple_evaluate
 from quant_utils import quantize_weight_per_channel_absmax
+from optimum.exporters.openvino import export_from_model
 
 
 # ---------------------------------------------------------------------------
@@ -63,12 +64,54 @@ def evaluate_perplexity(model, tokenizer, workdir, task="wikitext", batch_size=8
     return res["results"][task]["word_perplexity,none"]
 
 
-def get_model_memory_gb(model):
-    """Compute total parameter memory in GB based on actual dtype of each param."""
+def get_theoretical_memory_gb(model, bit_map):
+    """
+    Compute theoretical model memory in GB assuming quantized layers are
+    stored at their target bit-width (even though fake-quant keeps them in fp16).
+
+    bit_map: {layer_name: bits}  e.g. {"backbone.layers.0.mixer.in_proj": 4}
+    Unquantized layers are assumed fp16 (2 bytes/element).
+    """
     total_bytes = 0
-    for param in model.parameters():
-        total_bytes += param.nelement() * param.element_size()
+    for name, param in model.named_parameters():
+        # strip .weight / .bias suffix to get the module name
+        layer_name = name.rsplit(".", 1)[0] if "." in name else name
+        bits = bit_map.get(layer_name, 16)
+        total_bytes += param.nelement() * bits / 8
     return total_bytes / (1024 ** 3)
+
+
+def save_openvino_ir(model, tokenizer, output_dir):
+    """
+    Export the (fake-)quantized model to OpenVINO IR (.xml + .bin) for
+    deployment on Intel Lunarlake NPU.
+
+    The model remains in fp16 internally (fake quant), but OpenVINO's compiler
+    will optimize it for the NPU at compile time.  Run inference with:
+        ov_model = core.compile_model("model.xml", device_name="NPU")
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"\nExporting to OpenVINO IR → {output_dir} ...")
+    export_from_model(
+        model=model,
+        output=output_dir,
+        task="text-generation-with-past",
+        trust_remote_code=True,
+    )
+    tokenizer.save_pretrained(output_dir)
+    print(f"OpenVINO IR saved to {output_dir}/ (model.xml + model.bin)")
+
+
+def save_checkpoint(model, tokenizer, base_dir):
+    """Save both HuggingFace pretrained format and OpenVINO IR to base_dir."""
+    hf_dir = os.path.join(base_dir, "hf")
+    ov_dir = os.path.join(base_dir, "ov")
+
+    print(f"\nSaving HF pretrained → {hf_dir}")
+    model.save_pretrained(hf_dir)
+    tokenizer.save_pretrained(hf_dir)
+
+    save_openvino_ir(model, tokenizer, ov_dir)
 
 
 # ----------  phase-1: build sensitivity list ----------------------------------
@@ -101,6 +144,8 @@ def main():
 
     KL4_PATH = "./results/mamba130m_sensitivity_results.json"
     KL8_PATH = "./results/mamba_130m_results_8bits.json"
+    CHECKPOINT_DIR = "/mymnt/mamba130_checkpoints"
+    CHECKPOINT_STEPS = {50, 100, 150}
 
     # phase-1: build sorted sensitivity list
     S = build_sensitivity_list(KL4_PATH, KL8_PATH)
@@ -112,8 +157,9 @@ def main():
     ).half()
 
     # --- baseline measurement (step 0) ---
+    bit_map = {}  # tracks {layer_name: bits} for theoretical memory accounting
     base_ppl = evaluate_perplexity(model, tokenizer, workdir)
-    base_mem = get_model_memory_gb(model)
+    base_mem = get_theoretical_memory_gb(model, bit_map)
     print(f"baseline  |  perplexity: {base_ppl:.2f}  |  memory: {base_mem:.4f} GB")
 
     sweep_log = [
@@ -132,9 +178,10 @@ def main():
         print(f"\n▶ step {idx}: quantize {layer} → {bit}-bit  (kl={kl_val:.6f})")
 
         quantize_single_layer(model, layer, n_bits=bit)
+        bit_map[layer] = bit  # record bit-width for theoretical memory calc
 
         ppl = evaluate_perplexity(model, tokenizer, workdir)
-        mem = get_model_memory_gb(model)
+        mem = get_theoretical_memory_gb(model, bit_map)
         print(f"   perplexity = {ppl:.2f}  |  memory = {mem:.4f} GB")
 
         sweep_log.append(
@@ -153,9 +200,12 @@ def main():
         with open(out_path, "w") as f:
             json.dump(sweep_log, f, indent=2)
 
-    # final save of quantized model
-    model.save_pretrained("mixed_precision_final")
-    tokenizer.save_pretrained("mixed_precision_final")
+        if idx in CHECKPOINT_STEPS:
+            ckpt_path = os.path.join(CHECKPOINT_DIR, f"step{idx}")
+            save_checkpoint(model, tokenizer, ckpt_path)
+
+    # final save: HF + OpenVINO IR
+    save_checkpoint(model, tokenizer, "openvino_exports/mixed_precision_final")
 
     print(f"\nsweep complete — {len(sweep_log)} entries written to {out_path}")
 
