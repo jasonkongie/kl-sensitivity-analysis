@@ -26,6 +26,16 @@ from quant_utils import quantize_weight_per_channel_absmax
 from optimum.exporters.openvino import export_from_model
 
 
+# ---------------------------------------------------------------------------
+#  runtime device
+# ---------------------------------------------------------------------------
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+elif torch.backends.mps.is_available():
+    DEVICE = "mps"
+else:
+    DEVICE = "cpu"
+
 
 # ----------  helpers ----------------------------------------------------------
 
@@ -148,7 +158,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(pretrained)
     model = AutoModelForCausalLM.from_pretrained(
         pretrained, trust_remote_code=True
-    ).half()
+    ).half().to(DEVICE)
 
     # --- baseline measurement (step 0) ---
     bit_map = {}  # tracks {layer_name: bits} for theoretical memory accounting
