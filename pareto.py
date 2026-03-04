@@ -136,14 +136,14 @@ def build_sensitivity_list(path4, path8):
 # ----------  main: greedy sweep -----------------------------------------------
 
 def main():
-    pretrained = "state-spaces/mamba-790m-hf"
+    pretrained = "state-spaces/mamba-130m-hf"
     workdir = "tmp_quant_dir"
     os.makedirs(workdir, exist_ok=True)
     output_dir = "./results"
     os.makedirs(output_dir, exist_ok=True)
 
-    KL4_PATH = "./results/mamba130m_sensitivity_results.json"
-    KL8_PATH = "./results/mamba_130m_results_8bits.json"
+    KL4_PATH = "./results/mamba130m_sensitivity_results_4bits.json"
+    KL8_PATH = "./results/mamba130m_sensitivity_results_8bits.json"
     CHECKPOINT_DIR = "/mymnt/mamba130_checkpoints"
     CHECKPOINT_STEPS = {50, 100, 150}
 
