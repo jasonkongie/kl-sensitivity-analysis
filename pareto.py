@@ -96,14 +96,19 @@ def save_openvino_ir(model, tokenizer, output_dir):
     """
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nExporting to OpenVINO IR → {output_dir} ...")
-    export_from_model(
-        model=model,
-        output=output_dir,
-        task="text-generation-with-past",
-        trust_remote_code=True,
-    )
-    tokenizer.save_pretrained(output_dir)
-    print(f"OpenVINO IR saved to {output_dir}/ (model.xml + model.bin)")
+    # OV tracer generates CPU dummy inputs — model must be on CPU during export
+    model.cpu()
+    try:
+        export_from_model(
+            model=model,
+            output=output_dir,
+            task="text-generation-with-past",
+            trust_remote_code=True,
+        )
+        tokenizer.save_pretrained(output_dir)
+        print(f"OpenVINO IR saved to {output_dir}/ (model.xml + model.bin)")
+    finally:
+        model.to(DEVICE)  # always move back, even if export fails
 
 
 def save_checkpoint(model, tokenizer, base_dir):
