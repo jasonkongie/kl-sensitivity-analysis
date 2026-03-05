@@ -249,7 +249,7 @@ def eval_ppl(model, tokenizer, tmp_dir="tmp_lmeval", task="wikitext", batch_size
     # always wipe the dir so stale configs from previous/different models don't bleed in
     shutil.rmtree(tmp_dir, ignore_errors=True)
     os.makedirs(tmp_dir)
-    model.save_pretrained(tmp_dir)
+    model.save_pretrained(tmp_dir, safe_serialization=False)
     tokenizer.save_pretrained(tmp_dir)
     wrapped = HFLM(
         pretrained=tmp_dir,
