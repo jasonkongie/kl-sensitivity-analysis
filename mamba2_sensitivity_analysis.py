@@ -8,10 +8,25 @@ import torch
 import torch.nn.functional as F
 
 from datasets import load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 from lm_eval.models.huggingface import HFLM
 from lm_eval.evaluator import simple_evaluate
 from quant_utils import quantize_weight_per_channel_absmax
+
+
+def _load_mamba2(pretrained):
+    """
+    Load state-spaces/mamba2-130m (non-hf) with AutoModelForCausalLM.
+    The non-hf config.json uses the mamba_ssm schema (d_model) instead of
+    the transformers Mamba2Config schema (hidden_size).  When hidden_size is
+    absent, AutoConfig silently defaults it to 4096, building the wrong
+    architecture.  We patch d_model -> hidden_size before constructing the
+    model to avoid the size-mismatch error.
+    """
+    cfg = AutoConfig.from_pretrained(pretrained, trust_remote_code=True)
+    if hasattr(cfg, "d_model") and getattr(cfg, "hidden_size", None) != cfg.d_model:
+        cfg.hidden_size = cfg.d_model
+    return AutoModelForCausalLM.from_pretrained(pretrained, config=cfg, trust_remote_code=True)
 
 
 def set_seed(seed):
@@ -223,12 +238,9 @@ def quantize_layer(model, layer_name, n_bits=4):
 
 def main():
     device         = "cuda" if torch.cuda.is_available() else "cpu"
-    # state-spaces/mamba2-130m (non-hf) uses the mamba_ssm config schema (d_model),
-    # not the transformers schema (hidden_size). AutoModelForCausalLM defaults
-    # hidden_size=4096 when the key is missing, causing the architecture mismatch.
-    # The -hf variant is the same weights with a transformers-compatible config.json.
-    pretrained     = "state-spaces/mamba2-130m-hf"
-    tokenizer_name = pretrained  # -hf bundles its own tokenizer
+    pretrained     = "state-spaces/mamba2-130m"
+    # mamba2-130m has no bundled tokenizer; use the GPT-NeoX one it was trained with
+    tokenizer_name = "EleutherAI/gpt-neox-20b"
     set_seed(42)
 
     # get 64 samples of length 512 from Wikitext-2 train
@@ -245,7 +257,7 @@ def main():
     targets = torch.cat([tar for _, tar in trainloader], dim=0).to(device)
 
     # find all linear layers
-    base   = AutoModelForCausalLM.from_pretrained(pretrained, trust_remote_code=True).half()
+    base   = _load_mamba2(pretrained).half()
     layers = [n for n, m in base.named_modules() if isinstance(m, torch.nn.Linear)]
     print(f"Found {len(layers)} linear layers.")
 
@@ -257,10 +269,8 @@ def main():
     for layer in layers:
         print(f"→ Layer: {layer}")
 
-        teacher = AutoModelForCausalLM.from_pretrained(pretrained, trust_remote_code=True)\
-                    .half().to(device).eval()
-        student = AutoModelForCausalLM.from_pretrained(pretrained, trust_remote_code=True)\
-                    .half().to(device).eval()
+        teacher = _load_mamba2(pretrained).half().to(device).eval()
+        student = _load_mamba2(pretrained).half().to(device).eval()
 
         student = quantize_layer(student, layer, n_bits=4)
 
