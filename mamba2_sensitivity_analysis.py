@@ -1,3 +1,4 @@
+import math
 import os
 import json
 import random
@@ -8,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from datasets import load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig, Mamba2Config
 from lm_eval.models.huggingface import HFLM
 from lm_eval.evaluator import simple_evaluate
 from quant_utils import quantize_weight_per_channel_absmax
@@ -17,15 +18,53 @@ from quant_utils import quantize_weight_per_channel_absmax
 def _load_mamba2(pretrained):
     """
     Load state-spaces/mamba2-130m (non-hf) with AutoModelForCausalLM.
-    The non-hf config.json uses the mamba_ssm schema (d_model) instead of
-    the transformers Mamba2Config schema (hidden_size).  When hidden_size is
-    absent, AutoConfig silently defaults it to 4096, building the wrong
-    architecture.  We patch d_model -> hidden_size before constructing the
-    model to avoid the size-mismatch error.
+
+    The non-hf config.json uses the mamba_ssm schema (d_model, n_layer,
+    ssm_cfg.headdim, pad_vocab_size_multiple, …) instead of the transformers
+    Mamba2Config schema.  AutoConfig picks up the model_type="mamba2" and
+    uses its own Mamba2Config with defaults that are wrong for this checkpoint:
+      - hidden_size  → 4096  (checkpoint: 768)
+      - num_heads    → 128   (checkpoint: 24)
+      - n_groups     → 8     (checkpoint: 1)
+      - vocab_size   → 50277 (checkpoint: 50288, padded to multiple of 16)
+
+    We read the raw mamba_ssm fields, map them, and construct a correct
+    Mamba2Config before loading the weights.
     """
-    cfg = AutoConfig.from_pretrained(pretrained, trust_remote_code=True)
-    if hasattr(cfg, "d_model") and getattr(cfg, "hidden_size", None) != cfg.d_model:
-        cfg.hidden_size = cfg.d_model
+    raw = AutoConfig.from_pretrained(pretrained, trust_remote_code=True)
+
+    # If already in transformers-native schema (no d_model field), load directly.
+    if not hasattr(raw, "d_model"):
+        return AutoModelForCausalLM.from_pretrained(pretrained, trust_remote_code=True)
+
+    # ── mamba_ssm schema fields ───────────────────────────────────────────────
+    d_model      = raw.d_model                                       # e.g. 768
+    n_layer      = getattr(raw, "n_layer", 24)
+    ssm_cfg      = getattr(raw, "ssm_cfg", {}) or {}
+    headdim      = ssm_cfg.get("headdim", 64) if isinstance(ssm_cfg, dict) else 64
+    ngroups      = ssm_cfg.get("ngroups", 1)  if isinstance(ssm_cfg, dict) else 1
+    expand       = getattr(raw, "expand", 2)
+    tie_emb      = getattr(raw, "tie_embeddings", False)
+
+    # vocab_size: mamba_ssm pads to the nearest multiple of pad_vocab_size_multiple
+    base_vocab   = getattr(raw, "vocab_size", 50277)
+    pad_multiple = getattr(raw, "pad_vocab_size_multiple", 16)
+    vocab_size   = math.ceil(base_vocab / pad_multiple) * pad_multiple
+
+    # ── derived transformers params ───────────────────────────────────────────
+    d_inner   = int(expand * d_model)
+    num_heads = d_inner // headdim
+
+    cfg = Mamba2Config(
+        hidden_size         = d_model,
+        num_hidden_layers   = n_layer,
+        num_heads           = num_heads,
+        head_dim            = headdim,
+        expand              = expand,
+        n_groups            = ngroups,
+        vocab_size          = vocab_size,
+        tie_word_embeddings = tie_emb,
+    )
     return AutoModelForCausalLM.from_pretrained(pretrained, config=cfg, trust_remote_code=True)
 
 
