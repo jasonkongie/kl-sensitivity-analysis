@@ -223,9 +223,12 @@ def quantize_layer(model, layer_name, n_bits=4):
 
 def main():
     device         = "cuda" if torch.cuda.is_available() else "cpu"
-    pretrained     = "state-spaces/mamba2-130m"
-    # non-hf variant has no bundled tokenizer; use the GPT-NeoX one it was trained with
-    tokenizer_name = "EleutherAI/gpt-neox-20b"
+    # state-spaces/mamba2-130m (non-hf) uses the mamba_ssm config schema (d_model),
+    # not the transformers schema (hidden_size). AutoModelForCausalLM defaults
+    # hidden_size=4096 when the key is missing, causing the architecture mismatch.
+    # The -hf variant is the same weights with a transformers-compatible config.json.
+    pretrained     = "state-spaces/mamba2-130m-hf"
+    tokenizer_name = pretrained  # -hf bundles its own tokenizer
     set_seed(42)
 
     # get 64 samples of length 512 from Wikitext-2 train
