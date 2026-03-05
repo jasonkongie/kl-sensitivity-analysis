@@ -18,13 +18,13 @@ def set_seed(seed):
     torch.manual_seed(seed)
     random.seed(seed)
 
-def get_pile(nsamples, seed, seqlen, model):
+def get_pile(nsamples, seed, seqlen, model, tokenizer_name=""):
     traindata = load_dataset(
         "json",
         data_files="/cpfs01/user/chenmengzhao/prompt_quantization/val.jsonl.zst",
         split="train"
     )
-    tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name or model, use_fast=False)
     enc = tokenizer("\n\n".join(traindata["text"][:1000]), return_tensors="pt")
 
     set_seed(seed)
@@ -38,9 +38,9 @@ def get_pile(nsamples, seed, seqlen, model):
         loader.append((inp, tar))
     return loader, None
 
-def get_wikitext2(nsamples, seed, seqlen, model):
+def get_wikitext2(nsamples, seed, seqlen, model, tokenizer_name=""):
     traindata = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
-    tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name or model, use_fast=False)
     enc = tokenizer("\n\n".join(traindata["text"]), return_tensors="pt")
 
     set_seed(seed)
@@ -54,9 +54,9 @@ def get_wikitext2(nsamples, seed, seqlen, model):
         loader.append((inp, tar))
     return loader, enc
 
-def get_ptb(nsamples, seed, seqlen, model):
+def get_ptb(nsamples, seed, seqlen, model, tokenizer_name=""):
     traindata = load_dataset("ptb_text_only", "penn_treebank", split="train")
-    tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name or model, use_fast=False)
     enc = tokenizer("\n\n".join(traindata["sentence"]), return_tensors="pt")
 
     set_seed(seed)
@@ -70,13 +70,13 @@ def get_ptb(nsamples, seed, seqlen, model):
         loader.append((inp, tar))
     return loader, enc
 
-def get_c4(nsamples, seed, seqlen, model):
+def get_c4(nsamples, seed, seqlen, model, tokenizer_name=""):
     traindata = load_dataset(
         "allenai/c4",
         data_files={"train": "en/c4-train.00000-of-01024.json.gz"},
         split="train"
     )
-    tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name or model, use_fast=False)
 
     set_seed(seed)
     loader = []
@@ -95,10 +95,10 @@ def get_c4(nsamples, seed, seqlen, model):
 
     return loader, None
 
-def get_ptb_new(nsamples, seed, seqlen, model):
+def get_ptb_new(nsamples, seed, seqlen, model, tokenizer_name=""):
     traindata = load_dataset("ptb_text_only", "penn_treebank", split="train")
     testdata  = load_dataset("ptb_text_only", "penn_treebank", split="test")
-    tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name or model, use_fast=False)
 
     train_enc = tokenizer(" ".join(traindata["sentence"]), return_tensors="pt")
     test_enc  = tokenizer(" ".join(testdata["sentence"]), return_tensors="pt")
@@ -114,7 +114,7 @@ def get_ptb_new(nsamples, seed, seqlen, model):
         loader.append((inp, tar))
     return loader, test_enc
 
-def get_c4_new(nsamples, seed, seqlen, model):
+def get_c4_new(nsamples, seed, seqlen, model, tokenizer_name=""):
     traindata = load_dataset(
         "allenai/c4",
         data_files={"train": "en/c4-train.00000-of-01024.json.gz"},
@@ -125,7 +125,7 @@ def get_c4_new(nsamples, seed, seqlen, model):
         data_files={"validation": "en/c4-validation.00000-of-00008.json.gz"},
         split="validation"
     )
-    tokenizer = AutoTokenizer.from_pretrained(model, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name or model, use_fast=False)
 
     set_seed(seed)
     loader = []
@@ -146,19 +146,19 @@ def get_c4_new(nsamples, seed, seqlen, model):
     val_enc = val_enc.input_ids[:, : (256 * seqlen)]
     return loader, val_enc
 
-def get_loaders(name, nsamples=128, seed=0, seqlen=2048, model=""):
+def get_loaders(name, nsamples=128, seed=0, seqlen=2048, model="", tokenizer_name=""):
     if "wikitext2" in name:
-        return get_wikitext2(nsamples, seed, seqlen, model)
+        return get_wikitext2(nsamples, seed, seqlen, model, tokenizer_name)
     if "pile" in name:
-        return get_pile(nsamples, seed, seqlen, model)
+        return get_pile(nsamples, seed, seqlen, model, tokenizer_name)
     if "ptb" in name and "new" not in name:
-        return get_ptb(nsamples, seed, seqlen, model)
+        return get_ptb(nsamples, seed, seqlen, model, tokenizer_name)
     if "ptb_new" in name:
-        return get_ptb_new(nsamples, seed, seqlen, model)
+        return get_ptb_new(nsamples, seed, seqlen, model, tokenizer_name)
     if "c4_new" in name:
-        return get_c4_new(nsamples, seed, seqlen, model)
+        return get_c4_new(nsamples, seed, seqlen, model, tokenizer_name)
     if "c4" in name:
-        return get_c4(nsamples, seed, seqlen, model)
+        return get_c4(nsamples, seed, seqlen, model, tokenizer_name)
     raise ValueError(f"Unknown loader name: {name}")
 
 
@@ -211,17 +211,20 @@ def quantize_layer(model, layer_name, n_bits=4):
 
 
 def main():
-    device     = "cuda" if torch.cuda.is_available() else "cpu"
-    pretrained = "nvidia/Hymba-1.5B-Base"
+    device         = "cuda" if torch.cuda.is_available() else "cpu"
+    pretrained     = "state-spaces/mamba2-130m"
+    # mamba2-130m has no bundled tokenizer; use the GPT-NeoX one it was trained with
+    tokenizer_name = "EleutherAI/gpt-neox-20b"
     set_seed(42)
 
     # get 64 samples of length 512 from Wikitext-2 train
     trainloader, _ = get_loaders(
-        name     = "wikitext2",
-        nsamples = 64,
-        seed     = 42,
-        seqlen   = 512,
-        model    = pretrained
+        name           = "wikitext2",
+        nsamples       = 64,
+        seed           = 42,
+        seqlen         = 512,
+        model          = pretrained,
+        tokenizer_name = tokenizer_name,
     )
 
     inputs = torch.cat([inp for inp, _ in trainloader], dim=0).to(device)
@@ -232,7 +235,7 @@ def main():
     layers = [n for n, m in base.named_modules() if isinstance(m, torch.nn.Linear)]
     print(f"Found {len(layers)} linear layers.")
 
-    tokenizer = AutoTokenizer.from_pretrained(pretrained, use_fast=False)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=False)
     results   = {}
     tmp_dir   = "quant_tmp"
     os.makedirs(tmp_dir, exist_ok=True)
