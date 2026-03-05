@@ -96,8 +96,9 @@ def save_openvino_ir(model, tokenizer, output_dir):
     """
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nExporting to OpenVINO IR → {output_dir} ...")
-    # OV tracer generates CPU dummy inputs — model must be on CPU during export
-    model.cpu()
+    # OV tracer needs CPU + fp32: its Mamba patcher allocates conv-state in
+    # float32, so a fp16 model causes a dtype mismatch during tracing.
+    model.cpu().float()
     try:
         export_from_model(
             model=model,
@@ -108,7 +109,7 @@ def save_openvino_ir(model, tokenizer, output_dir):
         tokenizer.save_pretrained(output_dir)
         print(f"OpenVINO IR saved to {output_dir}/ (model.xml + model.bin)")
     finally:
-        model.to(DEVICE)  # always move back, even if export fails
+        model.half().to(DEVICE)  # restore fp16 on CUDA, even if export fails
 
 
 def save_checkpoint(model, tokenizer, base_dir):
