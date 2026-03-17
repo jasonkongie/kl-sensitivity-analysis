@@ -7,6 +7,10 @@ Minimal setup for **KL Divergence based Post-Training Mixed-Precision Quantizati
 ## Docker Image
 docker pull ghcr.io/tilmto/hymba:v1
 
+## On-Device Profiling (Lunar Lake / OpenVINO)
+
+See [`lunarlake/quantization_IR/README.md`](lunarlake/quantization_IR/README.md) for the full reproducibility guide covering model conversion, quantization, benchmarking, and perplexity evaluation on Intel Lunar Lake.
+
 ## Repository Structure
 1. algorithm.py               # Mixed-precision allocator (KL-guided)  <br />
 2. evaluate_ppl.py            # Perplexity evaluation via lm-eval  <br />
